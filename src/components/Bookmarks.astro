@@ -7,7 +7,7 @@
 // file. Astro runs that script in the browser, never during the build, so
 // browser-only APIs are safe there.
 //
-// You will implement the behavior in Step 3.
+// Implemented in Step 3: see the client <script> below.
 ---
 <form id="add-bookmark">
   <div class="field">
@@ -60,11 +60,135 @@
   //   7. On page load, read the saved bookmarks from storage and render
   //      them so the list persists across reloads.
   //
-  // Because this code lives in a client <script>, browser storage APIs are
-  // safe to use here without breaking the static build.
+  // Because this code lives in a client <script>
+  // CLIENT-SIDE BOUNDARY - runs in the browser only, so localStorage is safe here.
+  const STORAGE_KEY = 'bookmarks';
+  const SLUG_PREFIX = 'mona-';
+  const BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
   const form = document.getElementById('add-bookmark');
-  form?.addEventListener('submit', (event) => {
-    event.preventDefault(); // keep this — stops the page from reloading
-    // Implement in Step 3.
+  const input = document.getElementById('url');
+  const list = document.getElementById('bookmark-list');
+  const emptyState = document.getElementById('empty-state');
+  const listHeader = document.getElementById('list-header');
+  const clearAll = document.getElementById('clear-all');
+
+  function loadBookmarks() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      return Array.isArray(parsed)
+        ? parsed.filter((b) => b && typeof b.url === 'string' && typeof b.slug === 'string')
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveBookmarks(items) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    } catch {
+      // Storage may be unavailable (private mode, quota); keep the in-memory list.
+    }
+  }
+
+  let bookmarks = loadBookmarks();
+
+  function normalizeUrl(raw) {
+    const value = raw.trim();
+    if (!value) return null;
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : 'https://' + value;
+    try {
+      const url = new URL(withScheme);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+      if (!url.hostname.includes('.') && url.hostname !== 'localhost') return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
+  function generateSlug() {
+    const used = new Set(bookmarks.map((b) => b.slug));
+    let slug;
+    do {
+      let id = '';
+      for (let i = 0; i < 4; i++) id += BASE62[Math.floor(Math.random() * BASE62.length)];
+      slug = SLUG_PREFIX + id;
+    } while (used.has(slug));
+    return slug;
+  }
+
+  function render() {
+    list.replaceChildren(
+      ...bookmarks.map((bookmark) => {
+        const item = document.createElement('li');
+        item.className = 'bookmark';
+
+        const link = document.createElement('a');
+        link.className = 'url';
+        link.href = bookmark.url;
+        link.textContent = bookmark.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+
+        const slug = document.createElement('span');
+        slug.className = 'slug';
+        slug.textContent = bookmark.slug;
+
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'copy';
+        copy.textContent = 'Copy';
+        copy.setAttribute('aria-label', 'Copy slug ' + bookmark.slug);
+        copy.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(bookmark.slug);
+            copy.textContent = 'Copied!';
+          } catch {
+            copy.textContent = 'Copy failed';
+          }
+          setTimeout(() => (copy.textContent = 'Copy'), 1500);
+        });
+
+        item.append(link, slug, copy);
+        return item;
+      })
+    );
+
+    const hasBookmarks = bookmarks.length > 0;
+    emptyState.hidden = hasBookmarks;
+    listHeader.hidden = !hasBookmarks;
+  }
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault(); // keep this - stops the page from reloading
+    const url = normalizeUrl(input.value);
+    if (!url) {
+      input.setCustomValidity('Please enter a valid http(s) URL.');
+      input.reportValidity();
+      return;
+    }
+    input.setCustomValidity('');
+    bookmarks = [{ url, slug: generateSlug() }, ...bookmarks];
+    saveBookmarks(bookmarks);
+    render();
+    form.reset();
+    input.focus();
   });
+
+  input.addEventListener('input', () => input.setCustomValidity(''));
+
+  clearAll.addEventListener('click', () => {
+    if (!confirm('Remove all saved bookmarks?')) return;
+    bookmarks = [];
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+    render();
+  });
+
+  render();
 </script>
